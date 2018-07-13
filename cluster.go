@@ -519,6 +519,11 @@ func (clstr *Cluster) waitTillStabilized() error {
 				Logger.Warn(err.Error())
 			}
 
+			// // if there are no errors in connecting to the cluster, then validate the partition table
+			// if err == nil {
+			// 	err = clstr.getPartitions().validate()
+			// }
+
 			// Check to see if cluster has changed since the last Tend().
 			// If not, assume cluster has stabilized and return.
 			if count == len(clstr.GetNodes()) {
@@ -550,6 +555,10 @@ func (clstr *Cluster) findAlias(alias *Host) *Node {
 }
 
 func (clstr *Cluster) setPartitions(partMap partitionMap) {
+	if err := partMap.validate(); err != nil {
+		Logger.Error("Partition map error: %s.", err.Error())
+	}
+
 	clstr.partitionWriteMap.Store(partMap)
 }
 
