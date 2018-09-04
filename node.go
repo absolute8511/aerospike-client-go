@@ -27,7 +27,10 @@ import (
 )
 
 const (
-	_PARTITIONS = 4096
+	_PARTITIONS            = 4096
+	largeKeySize           = 1024 * 256
+	largeKeyPoolSize       = 8
+	largeKeyGetConnTimeout = time.Millisecond * 500
 )
 
 // Node represents an Aerospike Database Server Node
@@ -47,9 +50,11 @@ type Node struct {
 	peersGeneration AtomicInt
 	peersCount      AtomicInt
 
-	connections     connectionQueue //AtomicQueue //ArrayBlockingQueue<*Connection>
-	connectionCount AtomicInt
-	health          AtomicInt //AtomicInteger
+	connections             connectionQueue //AtomicQueue //ArrayBlockingQueue<*Connection>
+	connectionCount         AtomicInt
+	largeKeyConnections     connectionQueue //AtomicQueue //ArrayBlockingQueue<*Connection>
+	largeKeyConnectionCount AtomicInt
+	health                  AtomicInt //AtomicInteger
 
 	partitionMap        partitionMap
 	partitionGeneration AtomicInt
@@ -72,14 +77,16 @@ func newNode(cluster *Cluster, nv *nodeValidator) *Node {
 
 		// Assign host to first IP alias because the server identifies nodes
 		// by IP address (not hostname).
-		connections:         *newConnectionQueue(cluster.clientPolicy.ConnectionQueueSize), //*NewAtomicQueue(cluster.clientPolicy.ConnectionQueueSize),
-		connectionCount:     *NewAtomicInt(0),
-		peersGeneration:     *NewAtomicInt(-1),
-		partitionGeneration: *NewAtomicInt(-2),
-		referenceCount:      *NewAtomicInt(0),
-		failures:            *NewAtomicInt(0),
-		active:              *NewAtomicBool(true),
-		partitionChanged:    *NewAtomicBool(false),
+		connections:             *newConnectionQueue(cluster.clientPolicy.ConnectionQueueSize), //*NewAtomicQueue(cluster.clientPolicy.ConnectionQueueSize),
+		connectionCount:         *NewAtomicInt(0),
+		largeKeyConnections:     *newConnectionQueue(largeKeyPoolSize),
+		largeKeyConnectionCount: *NewAtomicInt(0),
+		peersGeneration:         *NewAtomicInt(-1),
+		partitionGeneration:     *NewAtomicInt(-2),
+		referenceCount:          *NewAtomicInt(0),
+		failures:                *NewAtomicInt(0),
+		active:                  *NewAtomicBool(true),
+		partitionChanged:        *NewAtomicBool(false),
 
 		supportsFloat:       *NewAtomicBool(nv.supportsFloat),
 		supportsBatchIndex:  *NewAtomicBool(nv.supportsBatchIndex),
@@ -354,7 +361,7 @@ func (nd *Node) dropIdleConnections() {
 // ClientPolicy.MaxQueueSize number of connections are already created.
 // This method will retry to retrieve a connection in case the connection pool
 // is empty, until timeout is reached.
-func (nd *Node) GetConnection(timeout time.Duration) (conn *Connection, err error) {
+func (nd *Node) GetConnection2(timeout time.Duration, isLargeKey bool) (conn *Connection, err error) {
 	deadline := time.Now().Add(timeout)
 	if timeout == 0 {
 		deadline = time.Now().Add(time.Second)
@@ -363,7 +370,7 @@ func (nd *Node) GetConnection(timeout time.Duration) (conn *Connection, err erro
 CL:
 	// try to acquire a connection; if the connection pool is empty, retry until
 	// timeout occures. If no timeout is set, will retry indefinitely.
-	conn, err = nd.getConnection(timeout)
+	conn, err = nd.getConnection(timeout, isLargeKey)
 	if err != nil {
 		if err == ErrConnectionPoolEmpty && nd.IsActive() && time.Now().Before(deadline) {
 			// give the scheduler time to breath; affects latency minimally, but throughput drastically
@@ -377,19 +384,37 @@ CL:
 	return conn, nil
 }
 
+func (nd *Node) GetConnection(timeout time.Duration) (conn *Connection, err error) {
+	return nd.GetConnection2(timeout, false)
+}
+
+func (nd *Node) GetConnectionForLargeKey() (conn *Connection, err error) {
+	return nd.GetConnection2(largeKeyGetConnTimeout, true)
+}
+
 // getConnection gets a connection to the node.
 // If no pooled connection is available, a new connection will be created.
 // This method does not include logic to retry in case the connection pool is empty
-func (nd *Node) getConnection(timeout time.Duration) (conn *Connection, err error) {
-	return nd.getConnectionWithHint(timeout, 0)
+func (nd *Node) getConnection(timeout time.Duration, isLargeKey bool) (conn *Connection, err error) {
+	return nd.getConnectionWithHint(timeout, 0, isLargeKey)
 }
 
 // getConnectionWithHint gets a connection to the node.
 // If no pooled connection is available, a new connection will be created.
 // This method does not include logic to retry in case the connection pool is empty
-func (nd *Node) getConnectionWithHint(timeout time.Duration, hint byte) (conn *Connection, err error) {
+func (nd *Node) getConnectionWithHint(timeout time.Duration, hint byte, isLargeKey bool) (conn *Connection, err error) {
 	// try to get a valid connection from the connection pool
-	for t := nd.connections.Poll(hint); t != nil; t = nd.connections.Poll(hint) {
+	cpool := &nd.connections
+	counter := &nd.connectionCount
+	limitSize := nd.cluster.clientPolicy.LimitConnectionsToQueueSize
+	queueSize := nd.cluster.clientPolicy.ConnectionQueueSize
+	if isLargeKey {
+		cpool = &nd.largeKeyConnections
+		counter = &nd.largeKeyConnectionCount
+		limitSize = true
+		queueSize = largeKeyPoolSize
+	}
+	for t := cpool.Poll(hint); t != nil; t = cpool.Poll(hint) {
 		conn = t //.(*Connection)
 		if conn.IsConnected() {
 			break
@@ -399,22 +424,25 @@ func (nd *Node) getConnectionWithHint(timeout time.Duration, hint byte) (conn *C
 	}
 
 	if conn == nil {
-		cc := nd.connectionCount.IncrementAndGet()
+		cc := counter.IncrementAndGet()
 
 		// if connection count is limited and enough connections are already created, don't create a new one
-		if nd.cluster.clientPolicy.LimitConnectionsToQueueSize && cc > nd.cluster.clientPolicy.ConnectionQueueSize {
-			nd.connectionCount.DecrementAndGet()
-			atomic.AddInt64(&nd.stats.ConnectionsPoolEmpty, 1)
+		if limitSize && cc > queueSize {
+			counter.DecrementAndGet()
+			if !isLargeKey {
+				atomic.AddInt64(&nd.stats.ConnectionsPoolEmpty, 1)
+			}
 			return nil, ErrConnectionPoolEmpty
 		}
 
 		atomic.AddInt64(&nd.stats.ConnectionsAttempts, 1)
 		if conn, err = NewSecureConnection(&nd.cluster.clientPolicy, nd.host); err != nil {
-			nd.connectionCount.DecrementAndGet()
+			counter.DecrementAndGet()
 			atomic.AddInt64(&nd.stats.ConnectionsFailed, 1)
 			return nil, err
 		}
 		conn.node = nd
+		conn.isForLargeKey = isLargeKey
 
 		// need to authenticate
 		if err = conn.Authenticate(nd.cluster.user, nd.cluster.Password()); err != nil {
@@ -447,8 +475,14 @@ func (nd *Node) getConnectionWithHint(timeout time.Duration, hint byte) (conn *C
 // closed and discarded.
 func (nd *Node) putConnectionWithHint(conn *Connection, hint byte) {
 	conn.refresh()
-	if !nd.active.Get() || !nd.connections.Offer(conn, hint) {
-		conn.Close()
+	if conn.isForLargeKey {
+		if !nd.active.Get() || !nd.largeKeyConnections.Offer(conn, hint) {
+			conn.Close()
+		}
+	} else {
+		if !nd.active.Get() || !nd.connections.Offer(conn, hint) {
+			conn.Close()
+		}
 	}
 }
 
@@ -515,6 +549,9 @@ func (nd *Node) String() string {
 }
 
 func (nd *Node) closeConnections() {
+	for conn := nd.largeKeyConnections.Poll(0); conn != nil; conn = nd.largeKeyConnections.Poll(0) {
+		conn.Close()
+	}
 	for conn := nd.connections.Poll(0); conn != nil; conn = nd.connections.Poll(0) {
 		// conn.(*Connection).Close()
 		conn.Close()

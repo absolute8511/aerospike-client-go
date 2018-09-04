@@ -91,7 +91,7 @@ type connectionQueue struct {
 }
 
 func newConnectionQueue(size int) *connectionQueue {
-	queueCount := runtime.NumCPU()
+	queueCount := runtime.NumCPU() / 2
 	if queueCount > size {
 		queueCount = size
 	}

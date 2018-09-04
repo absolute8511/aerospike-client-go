@@ -30,7 +30,8 @@ import (
 
 // Connection represents a connection with a timeout.
 type Connection struct {
-	node *Node
+	node          *Node
+	isForLargeKey bool
 
 	// timeout
 	timeout time.Duration
@@ -241,7 +242,11 @@ func (ctn *Connection) Close() {
 	if ctn != nil && ctn.conn != nil {
 		// deregister
 		if ctn.node != nil {
-			ctn.node.connectionCount.DecrementAndGet()
+			if ctn.isForLargeKey {
+				ctn.node.largeKeyConnectionCount.DecrementAndGet()
+			} else {
+				ctn.node.connectionCount.DecrementAndGet()
+			}
 		}
 
 		if err := ctn.conn.Close(); err != nil {
