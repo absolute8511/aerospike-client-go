@@ -20,7 +20,7 @@ import (
 	"math"
 	"math/rand"
 
-	as "github.com/aerospike/aerospike-client-go"
+	as "github.com/absolute8511/aerospike-client-go"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"

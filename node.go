@@ -21,9 +21,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	. "github.com/aerospike/aerospike-client-go/logger"
-	. "github.com/aerospike/aerospike-client-go/types"
-	. "github.com/aerospike/aerospike-client-go/types/atomic"
+	. "github.com/absolute8511/aerospike-client-go/logger"
+	. "github.com/absolute8511/aerospike-client-go/types"
+	. "github.com/absolute8511/aerospike-client-go/types/atomic"
 )
 
 const (

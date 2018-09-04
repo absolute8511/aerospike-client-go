@@ -20,7 +20,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	as "github.com/aerospike/aerospike-client-go"
+	as "github.com/absolute8511/aerospike-client-go"
 )
 
 var _ = Describe("LargeList Test", func() {

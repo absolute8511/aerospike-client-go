@@ -15,7 +15,7 @@
 package aerospike
 
 import (
-	. "github.com/aerospike/aerospike-client-go/types"
+	. "github.com/absolute8511/aerospike-client-go/types"
 )
 
 // List bin operations. Create list operations used by client.Operate command.

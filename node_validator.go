@@ -21,8 +21,8 @@ import (
 	"strings"
 	"sync"
 
-	. "github.com/aerospike/aerospike-client-go/logger"
-	. "github.com/aerospike/aerospike-client-go/types"
+	. "github.com/absolute8511/aerospike-client-go/logger"
+	. "github.com/absolute8511/aerospike-client-go/types"
 )
 
 type nodesToAddT struct {
