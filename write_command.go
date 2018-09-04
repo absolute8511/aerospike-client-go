@@ -15,8 +15,8 @@
 package aerospike
 
 import (
-	. "github.com/aerospike/aerospike-client-go/types"
-	Buffer "github.com/aerospike/aerospike-client-go/utils/buffer"
+	. "github.com/absolute8511/aerospike-client-go/types"
+	Buffer "github.com/absolute8511/aerospike-client-go/utils/buffer"
 )
 
 // guarantee writeCommand implements command interface
@@ -45,7 +45,23 @@ func newWriteCommand(cluster *Cluster,
 		binMap:        binMap,
 		operation:     operation,
 	}
-
+	totalSize := 0
+	if binMap == nil {
+		for i := range bins {
+			if sz, err := bins[i].Value.estimateSize(); err != nil {
+			} else {
+				totalSize += sz
+			}
+		}
+	} else {
+		for _, value := range binMap {
+			if sz, err := NewValue(value).estimateSize(); err != nil {
+			} else {
+				totalSize += sz
+			}
+		}
+	}
+	newWriteCmd.isLarge = totalSize > largeKeySize
 	return newWriteCmd
 }
 

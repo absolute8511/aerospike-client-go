@@ -17,7 +17,7 @@ package aerospike
 import (
 	"time"
 
-	Buffer "github.com/aerospike/aerospike-client-go/utils/buffer"
+	Buffer "github.com/absolute8511/aerospike-client-go/utils/buffer"
 )
 
 type singleCommand struct {
@@ -26,6 +26,7 @@ type singleCommand struct {
 	cluster   *Cluster
 	key       *Key
 	partition Partition
+	isLarge   bool
 }
 
 func newSingleCommand(cluster *Cluster, key *Key) singleCommand {
@@ -38,7 +39,7 @@ func newSingleCommand(cluster *Cluster, key *Key) singleCommand {
 }
 
 func (cmd *singleCommand) getConnection(timeout time.Duration) (*Connection, error) {
-	return cmd.node.getConnectionWithHint(timeout, cmd.key.digest[0])
+	return cmd.node.getConnectionWithHint(timeout, cmd.key.digest[0], cmd.isLarge)
 }
 
 func (cmd *singleCommand) putConnection(conn *Connection) {

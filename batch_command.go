@@ -19,9 +19,9 @@ import (
 	"reflect"
 	"time"
 
-	. "github.com/aerospike/aerospike-client-go/types"
-	xrand "github.com/aerospike/aerospike-client-go/types/rand"
-	Buffer "github.com/aerospike/aerospike-client-go/utils/buffer"
+	. "github.com/absolute8511/aerospike-client-go/types"
+	xrand "github.com/absolute8511/aerospike-client-go/types/rand"
+	Buffer "github.com/absolute8511/aerospike-client-go/utils/buffer"
 )
 
 const (
@@ -80,7 +80,7 @@ func (cmd *baseMultiCommand) getNode(ifc command) (*Node, error) {
 }
 
 func (cmd *baseMultiCommand) getConnection(timeout time.Duration) (*Connection, error) {
-	return cmd.node.getConnectionWithHint(timeout, byte(xrand.Int64()%256))
+	return cmd.node.getConnectionWithHint(timeout, byte(xrand.Int64()%256), false)
 }
 
 func (cmd *baseMultiCommand) putConnection(conn *Connection) {
