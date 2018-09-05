@@ -88,6 +88,9 @@ type BasePolicy struct {
 	// Batch, scan and query are also not affected by replica algorithms.
 	// Default to sending read commands to the node containing the key's master partition.
 	ReplicaPolicy ReplicaPolicy
+
+	// for the key with large value or the hot key, use this to do the command with isolated pool to avoid affect others
+	UseIsolatedConnPool bool
 }
 
 // NewPolicy generates a new BasePolicy instance with default values.

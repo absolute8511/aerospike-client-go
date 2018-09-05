@@ -53,11 +53,15 @@ var objectParser func(
 ) error
 
 func newReadCommand(cluster *Cluster, policy *BasePolicy, key *Key, binNames []string) readCommand {
-	return readCommand{
+	rcmd := readCommand{
 		singleCommand: newSingleCommand(cluster, key),
 		binNames:      binNames,
 		policy:        policy,
 	}
+	if policy != nil && policy.UseIsolatedConnPool {
+		rcmd.isLarge = true
+	}
+	return rcmd
 }
 
 func (cmd *readCommand) getPolicy(ifc command) Policy {

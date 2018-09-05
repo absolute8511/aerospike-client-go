@@ -435,6 +435,9 @@ func (nd *Node) getConnectionWithHint(timeout time.Duration, hint byte, isLargeK
 			return nil, ErrConnectionPoolEmpty
 		}
 
+		if isLargeKey {
+			Logger.Info("get conn for large key, current: %v", cc)
+		}
 		atomic.AddInt64(&nd.stats.ConnectionsAttempts, 1)
 		if conn, err = NewSecureConnection(&nd.cluster.clientPolicy, nd.host); err != nil {
 			counter.DecrementAndGet()

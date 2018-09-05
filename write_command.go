@@ -15,6 +15,7 @@
 package aerospike
 
 import (
+	"github.com/absolute8511/aerospike-client-go/logger"
 	. "github.com/absolute8511/aerospike-client-go/types"
 	Buffer "github.com/absolute8511/aerospike-client-go/utils/buffer"
 )
@@ -46,22 +47,29 @@ func newWriteCommand(cluster *Cluster,
 		operation:     operation,
 	}
 	totalSize := 0
-	if binMap == nil {
-		for i := range bins {
-			if sz, err := bins[i].Value.estimateSize(); err != nil {
-			} else {
-				totalSize += sz
-			}
-		}
+	if policy != nil && policy.UseIsolatedConnPool {
+		newWriteCmd.isLarge = true
 	} else {
-		for _, value := range binMap {
-			if sz, err := NewValue(value).estimateSize(); err != nil {
-			} else {
-				totalSize += sz
+		if binMap == nil {
+			for i := range bins {
+				if sz, err := bins[i].Value.estimateSize(); err != nil {
+				} else {
+					totalSize += sz
+				}
+			}
+		} else {
+			for _, value := range binMap {
+				if sz, err := NewValue(value).estimateSize(); err != nil {
+				} else {
+					totalSize += sz
+				}
 			}
 		}
+		newWriteCmd.isLarge = totalSize > largeKeySize
 	}
-	newWriteCmd.isLarge = totalSize > largeKeySize
+	if newWriteCmd.isLarge {
+		logger.Logger.Info("write large key: %v, size: %v", key.String(), totalSize)
+	}
 	return newWriteCmd
 }
 

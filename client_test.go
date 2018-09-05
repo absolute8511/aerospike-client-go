@@ -466,6 +466,35 @@ var _ = Describe("Aerospike", func() {
 					})
 				})
 
+				Context("Bins with large BLOB type", func() {
+					It("must save and retrieve large Bins with AerospikeBlobs type", func() {
+						v := make([]byte, 1024*256+1)
+						person := &testBLOB{name: "SomeDude" + string(v)}
+						largebin := as.NewBin("Aerospike1", person)
+						err = client.PutBins(wpolicy, key, largebin)
+						Expect(err).ToNot(HaveOccurred())
+
+						rec, err = client.Get(rpolicy, key)
+						Expect(err).ToNot(HaveOccurred())
+					})
+				})
+
+				Context("with isolated key", func() {
+					It("must save and retrieve isolated key with AerospikeBlobs type", func() {
+						person := &testBLOB{name: "SomeDude"}
+						largebin := as.NewBin("Aerospike1", person)
+						wpolicy.UseIsolatedConnPool = true
+						rpolicy.UseIsolatedConnPool = true
+						err = client.PutBins(wpolicy, key, largebin)
+						Expect(err).ToNot(HaveOccurred())
+
+						rec, err = client.Get(rpolicy, key)
+						Expect(err).ToNot(HaveOccurred())
+						wpolicy.UseIsolatedConnPool = false
+						rpolicy.UseIsolatedConnPool = false
+					})
+				})
+
 				Context("Bins with LIST type", func() {
 
 					It("must save a key with Array Types", func() {
