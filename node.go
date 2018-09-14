@@ -361,20 +361,25 @@ func (nd *Node) dropIdleConnections() {
 // ClientPolicy.MaxQueueSize number of connections are already created.
 // This method will retry to retrieve a connection in case the connection pool
 // is empty, until timeout is reached.
-func (nd *Node) GetConnection2(timeout time.Duration, isLargeKey bool) (conn *Connection, err error) {
+func (nd *Node) getConnectionWithRetry(timeout time.Duration, hint byte, maxRetries int, isLargeKey bool) (conn *Connection, err error) {
 	deadline := time.Now().Add(timeout)
 	if timeout == 0 {
 		deadline = time.Now().Add(time.Second)
 	}
+	retry := 0
 
 CL:
 	// try to acquire a connection; if the connection pool is empty, retry until
 	// timeout occures. If no timeout is set, will retry indefinitely.
-	conn, err = nd.getConnection(timeout, isLargeKey)
+	retry++
+	conn, err = nd.getConnection(timeout, hint, isLargeKey)
 	if err != nil {
 		if err == ErrConnectionPoolEmpty && nd.IsActive() && time.Now().Before(deadline) {
+			if (maxRetries <= 0 && retry > 0) || (maxRetries > 0 && retry > maxRetries) {
+				return nil, err
+			}
 			// give the scheduler time to breath; affects latency minimally, but throughput drastically
-			time.Sleep(time.Microsecond)
+			time.Sleep(time.Microsecond * 400)
 			goto CL
 		}
 
@@ -385,18 +390,22 @@ CL:
 }
 
 func (nd *Node) GetConnection(timeout time.Duration) (conn *Connection, err error) {
-	return nd.GetConnection2(timeout, false)
+	return nd.getConnectionWithRetry(timeout, 0, 1, false)
 }
 
 func (nd *Node) GetConnectionForLargeKey() (conn *Connection, err error) {
-	return nd.GetConnection2(largeKeyGetConnTimeout, true)
+	return nd.getConnectionWithRetry(largeKeyGetConnTimeout, 0, 1, true)
 }
 
 // getConnection gets a connection to the node.
 // If no pooled connection is available, a new connection will be created.
 // This method does not include logic to retry in case the connection pool is empty
-func (nd *Node) getConnection(timeout time.Duration, isLargeKey bool) (conn *Connection, err error) {
-	return nd.getConnectionWithHint(timeout, 0, isLargeKey)
+func (nd *Node) getConnection(timeout time.Duration, hint byte, isLargeKey bool) (conn *Connection, err error) {
+	return nd.getConnectionWithHint(timeout, hint, isLargeKey)
+}
+
+func (nd *Node) getConnectionWithHintAndRetry(timeout time.Duration, hint byte, maxRetry int, isLargeKey bool) (conn *Connection, err error) {
+	return nd.getConnectionWithRetry(timeout, hint, maxRetry, isLargeKey)
 }
 
 // getConnectionWithHint gets a connection to the node.

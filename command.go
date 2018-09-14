@@ -87,7 +87,7 @@ type command interface {
 
 	writeBuffer(ifc command) error
 	getNode(ifc command) (*Node, error)
-	getConnection(timeout time.Duration) (*Connection, error)
+	getConnection(timeout time.Duration, retry int) (*Connection, error)
 	putConnection(conn *Connection)
 	parseResult(ifc command, conn *Connection) error
 	parseRecordResults(ifc command, receiveSize int) (bool, error)
@@ -1575,8 +1575,9 @@ func (cmd *baseCommand) execute(ifc command) error {
 			}
 		}
 
+		tn := time.Now()
 		// check for command timeout
-		if policy.Timeout > 0 && time.Now().After(deadline) {
+		if policy.Timeout > 0 && tn.After(deadline) {
 			break
 		}
 
@@ -1587,9 +1588,10 @@ func (cmd *baseCommand) execute(ifc command) error {
 			continue
 		}
 
-		cmd.conn, err = ifc.getConnection(socketTimeout)
+		cmd.conn, err = ifc.getConnection(socketTimeout, policy.MaxRetries*2)
 		if err != nil {
-			Logger.Warn("Node " + cmd.node.String() + ": " + err.Error())
+			cost := time.Since(tn)
+			Logger.Warn("Node " + cmd.node.String() + ": " + err.Error() + ", cost:" + cost.String())
 			continue
 		}
 

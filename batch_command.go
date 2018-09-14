@@ -79,8 +79,8 @@ func (cmd *baseMultiCommand) getNode(ifc command) (*Node, error) {
 	return cmd.node, nil
 }
 
-func (cmd *baseMultiCommand) getConnection(timeout time.Duration) (*Connection, error) {
-	return cmd.node.getConnectionWithHint(timeout, byte(xrand.Int64()%256), false)
+func (cmd *baseMultiCommand) getConnection(timeout time.Duration, maxRetry int) (*Connection, error) {
+	return cmd.node.getConnectionWithHintAndRetry(timeout, byte(xrand.Int64()%256), maxRetry, false)
 }
 
 func (cmd *baseMultiCommand) putConnection(conn *Connection) {

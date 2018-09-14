@@ -38,8 +38,8 @@ func newSingleCommand(cluster *Cluster, key *Key) singleCommand {
 	}
 }
 
-func (cmd *singleCommand) getConnection(timeout time.Duration) (*Connection, error) {
-	return cmd.node.getConnectionWithHint(timeout, cmd.key.digest[0], cmd.isLarge)
+func (cmd *singleCommand) getConnection(timeout time.Duration, maxRetry int) (*Connection, error) {
+	return cmd.node.getConnectionWithHintAndRetry(timeout, cmd.key.digest[0], maxRetry, cmd.isLarge)
 }
 
 func (cmd *singleCommand) putConnection(conn *Connection) {
