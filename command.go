@@ -1588,7 +1588,7 @@ func (cmd *baseCommand) execute(ifc command) error {
 			continue
 		}
 
-		cmd.conn, err = ifc.getConnection(socketTimeout, policy.MaxRetries*2)
+		cmd.conn, err = ifc.getConnection(socketTimeout, policy.MaxRetries*100)
 		if err != nil {
 			cost := time.Since(tn)
 			Logger.Warn("Node " + cmd.node.String() + ": " + err.Error() + ", cost:" + cost.String())

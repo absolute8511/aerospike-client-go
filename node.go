@@ -379,7 +379,7 @@ CL:
 				return nil, err
 			}
 			// give the scheduler time to breath; affects latency minimally, but throughput drastically
-			time.Sleep(time.Microsecond * 400)
+			time.Sleep(time.Microsecond * 200)
 			goto CL
 		}
 
