@@ -29,7 +29,7 @@ import (
 const (
 	_PARTITIONS            = 4096
 	largeKeySize           = 1024 * 256
-	largeKeyPoolSize       = 8
+	largeKeyPoolSize       = 4
 	largeKeyGetConnTimeout = time.Millisecond * 500
 )
 
