@@ -354,6 +354,7 @@ func (nd *Node) refreshFailed(e error) {
 // a fresh connection or exhaust the queue.
 func (nd *Node) dropIdleConnections() {
 	nd.connections.DropIdle()
+	nd.largeKeyConnections.DropIdle()
 }
 
 // GetConnection gets a connection to the node.
