@@ -15,10 +15,8 @@
 package aerospike
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,70 +27,6 @@ import (
 	. "github.com/absolute8511/aerospike-client-go/types"
 	. "github.com/absolute8511/aerospike-client-go/types/atomic"
 )
-
-type partitionMap map[string][][]*Node
-
-// String implements stringer interface for partitionMap
-func (pm partitionMap) clone() partitionMap {
-	// Make shallow copy of map.
-	pmap := make(partitionMap, len(pm))
-	for ns, replArr := range pm {
-		newReplArr := make([][]*Node, len(replArr))
-		for i, nArr := range replArr {
-			newNArr := make([]*Node, len(nArr))
-			copy(newNArr, nArr)
-			newReplArr[i] = newNArr
-		}
-		pmap[ns] = newReplArr
-	}
-	return pmap
-}
-
-// String implements stringer interface for partitionMap
-func (pm partitionMap) merge(partMap partitionMap) {
-	// merge partitions; iterate over the new partition and update the old one
-	for ns, replicaArray := range partMap {
-		if pm[ns] == nil {
-			pm[ns] = make([][]*Node, len(replicaArray))
-		}
-
-		for i, nodeArray := range replicaArray {
-			if pm[ns][i] == nil {
-				pm[ns][i] = make([]*Node, len(nodeArray))
-			}
-
-			for j, node := range nodeArray {
-				if node != nil {
-					pm[ns][i][j] = node
-				}
-			}
-		}
-	}
-}
-
-// String implements stringer interface for partitionMap
-func (pm partitionMap) String() string {
-	res := bytes.Buffer{}
-	for ns, replicaArray := range pm {
-		for i, nodeArray := range replicaArray {
-			for j, node := range nodeArray {
-				res.WriteString(ns)
-				res.WriteString(",")
-				res.WriteString(strconv.Itoa(i))
-				res.WriteString(",")
-				res.WriteString(strconv.Itoa(j))
-				res.WriteString(",")
-				if node != nil {
-					res.WriteString(node.String())
-				} else {
-					res.WriteString("NIL")
-				}
-				res.WriteString("\n")
-			}
-		}
-	}
-	return res.String()
-}
 
 // Cluster encapsulates the aerospike cluster nodes and manages
 // them.
@@ -555,10 +489,6 @@ func (clstr *Cluster) findAlias(alias *Host) *Node {
 }
 
 func (clstr *Cluster) setPartitions(partMap partitionMap) {
-	if err := partMap.validate(); err != nil {
-		Logger.Error("Partition map error: %s.", err.Error())
-	}
-
 	clstr.partitionWriteMap.Store(partMap)
 }
 
