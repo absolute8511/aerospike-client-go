@@ -367,6 +367,10 @@ func (nd *Node) getConnectionWithRetry(timeout time.Duration, hint byte, maxRetr
 	if timeout == 0 {
 		deadline = time.Now().Add(time.Second)
 	}
+	// avoid retry too much for exception keys
+	if isLargeKey && maxRetries > 3 {
+		maxRetries = 3
+	}
 	retry := 0
 
 CL:
