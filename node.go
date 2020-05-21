@@ -380,11 +380,11 @@ CL:
 	conn, err = nd.getConnection(timeout, hint, isLargeKey)
 	if err != nil {
 		if err == ErrConnectionPoolEmpty && nd.IsActive() && time.Now().Before(deadline) {
-			if (maxRetries <= 0 && retry > 0) || (maxRetries > 0 && retry > maxRetries) {
+			if (maxRetries <= 0 && retry > 0) || (maxRetries > 0 && retry >= maxRetries) {
 				return nil, err
 			}
 			// give the scheduler time to breath; affects latency minimally, but throughput drastically
-			time.Sleep(time.Microsecond * 200)
+			time.Sleep(time.Microsecond * 400)
 			goto CL
 		}
 
