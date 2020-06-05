@@ -30,7 +30,7 @@ const (
 	_PARTITIONS            = 4096
 	largeKeySize           = 1024 * 256
 	largeKeyPoolSize       = 4
-	largeKeyGetConnTimeout = time.Millisecond * 500
+	largeKeyGetConnTimeout = time.Millisecond * 200
 )
 
 // Node represents an Aerospike Database Server Node
@@ -69,6 +69,10 @@ type Node struct {
 
 // NewNode initializes a server node with connection parameters.
 func newNode(cluster *Cluster, nv *nodeValidator) *Node {
+	lps := cluster.clientPolicy.LargeConnectionQueueSize
+	if lps <= 0 {
+		lps = largeKeyPoolSize
+	}
 	newNode := &Node{
 		cluster: cluster,
 		name:    nv.name,
@@ -79,7 +83,7 @@ func newNode(cluster *Cluster, nv *nodeValidator) *Node {
 		// by IP address (not hostname).
 		connections:             *newConnectionQueue(cluster.clientPolicy.ConnectionQueueSize), //*NewAtomicQueue(cluster.clientPolicy.ConnectionQueueSize),
 		connectionCount:         *NewAtomicInt(0),
-		largeKeyConnections:     *newConnectionQueue(largeKeyPoolSize),
+		largeKeyConnections:     *newConnectionQueue(lps),
 		largeKeyConnectionCount: *NewAtomicInt(0),
 		peersGeneration:         *NewAtomicInt(-1),
 		partitionGeneration:     *NewAtomicInt(-2),
@@ -426,7 +430,10 @@ func (nd *Node) getConnectionWithHint(timeout time.Duration, hint byte, isLargeK
 		cpool = &nd.largeKeyConnections
 		counter = &nd.largeKeyConnectionCount
 		limitSize = true
-		queueSize = largeKeyPoolSize
+		queueSize = nd.cluster.clientPolicy.LargeConnectionQueueSize
+		if queueSize <= 0 {
+			queueSize = largeKeyPoolSize
+		}
 	}
 	for t := cpool.Poll(hint); t != nil; t = cpool.Poll(hint) {
 		conn = t //.(*Connection)

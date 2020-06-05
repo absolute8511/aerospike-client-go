@@ -47,6 +47,9 @@ type ClientPolicy struct {
 	// ConnectionQueueCache specifies the size of the Connection Queue cache PER NODE.
 	ConnectionQueueSize int //= 256
 
+	// LargeConnectionQueueCache specifies the size of the Connection Queue cache PER NODE for isolated pool.
+	LargeConnectionQueueSize int //= 4
+
 	// If set to true, will not create a new connection
 	// to the node if there are already `ConnectionQueueSize` active connections.
 	LimitConnectionsToQueueSize bool //= true
@@ -97,6 +100,7 @@ func NewClientPolicy() *ClientPolicy {
 		Timeout:                     30 * time.Second,
 		IdleTimeout:                 defaultIdleTimeout,
 		ConnectionQueueSize:         256,
+		LargeConnectionQueueSize:    4,
 		FailIfNotConnected:          true,
 		TendInterval:                time.Second,
 		LimitConnectionsToQueueSize: true,
