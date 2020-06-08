@@ -30,7 +30,7 @@ const (
 	_PARTITIONS            = 4096
 	largeKeySize           = 1024 * 256
 	largeKeyPoolSize       = 4
-	largeKeyGetConnTimeout = time.Millisecond * 30
+	largeKeyGetConnTimeout = time.Millisecond * 60
 	sleepBetweenRetry      = time.Microsecond * 200
 )
 
@@ -378,6 +378,9 @@ func (nd *Node) getConnectionWithRetry(timeout time.Duration, hint byte, maxRetr
 	if timeout == 0 {
 		realTo = time.Second
 	}
+	if isLargeKey && realTo > largeKeyGetConnTimeout {
+		realTo = largeKeyGetConnTimeout
+	}
 	deadline := time.Now().Add(realTo)
 	// avoid retry too much for exception keys
 	if isLargeKey && maxRetries > 3 {
@@ -430,10 +433,6 @@ CL:
 
 func (nd *Node) GetConnection(timeout time.Duration) (conn *Connection, err error) {
 	return nd.getConnectionWithRetry(timeout, 0, 1, false)
-}
-
-func (nd *Node) GetConnectionForLargeKey() (conn *Connection, err error) {
-	return nd.getConnectionWithRetry(largeKeyGetConnTimeout, 0, 1, true)
 }
 
 // getConnection gets a connection to the node.
