@@ -30,7 +30,8 @@ const (
 	_PARTITIONS            = 4096
 	largeKeySize           = 1024 * 256
 	largeKeyPoolSize       = 4
-	largeKeyGetConnTimeout = time.Millisecond * 200
+	largeKeyGetConnTimeout = time.Millisecond * 30
+	sleepBetweenRetry      = time.Microsecond * 200
 )
 
 // Node represents an Aerospike Database Server Node
@@ -62,7 +63,11 @@ type Node struct {
 	failures            AtomicInt
 	partitionChanged    AtomicBool
 
-	active AtomicBool
+	active             AtomicBool
+	waitListForLarge   chan struct{}
+	waitingCntForLarge int64
+	waitList           chan struct{}
+	waitingCnt         int64
 
 	supportsFloat, supportsBatchIndex, supportsReplicasAll, supportsGeo, supportsPeers AtomicBool
 }
@@ -97,6 +102,8 @@ func newNode(cluster *Cluster, nv *nodeValidator) *Node {
 		supportsReplicasAll: *NewAtomicBool(nv.supportsReplicasAll),
 		supportsGeo:         *NewAtomicBool(nv.supportsGeo),
 		supportsPeers:       *NewAtomicBool(nv.supportsPeers),
+		waitListForLarge:    make(chan struct{}, lps+1),
+		waitList:            make(chan struct{}, cluster.clientPolicy.ConnectionQueueSize+1),
 	}
 
 	newNode.aliases.Store(nv.aliases)
@@ -367,16 +374,23 @@ func (nd *Node) dropIdleConnections() {
 // This method will retry to retrieve a connection in case the connection pool
 // is empty, until timeout is reached.
 func (nd *Node) getConnectionWithRetry(timeout time.Duration, hint byte, maxRetries int, isLargeKey bool) (conn *Connection, err error) {
-	deadline := time.Now().Add(timeout)
+	realTo := timeout
 	if timeout == 0 {
-		deadline = time.Now().Add(time.Second)
+		realTo = time.Second
 	}
+	deadline := time.Now().Add(realTo)
 	// avoid retry too much for exception keys
 	if isLargeKey && maxRetries > 3 {
 		maxRetries = 3
 	}
 	retry := 0
+	var to *time.Timer
 
+	defer func() {
+		if to != nil {
+			to.Stop()
+		}
+	}()
 CL:
 	// try to acquire a connection; if the connection pool is empty, retry until
 	// timeout occures. If no timeout is set, will retry indefinitely.
@@ -387,8 +401,24 @@ CL:
 			if (maxRetries <= 0 && retry > 0) || (maxRetries > 0 && retry >= maxRetries) {
 				return nil, err
 			}
+			if to == nil {
+				to = time.NewTimer(realTo)
+			}
+			wc := &nd.waitingCnt
+			wl := nd.waitList
+			if isLargeKey {
+				wc = &nd.waitingCntForLarge
+				wl = nd.waitListForLarge
+			}
+			atomic.AddInt64(wc, 1)
+			select {
+			case <-to.C:
+			case <-wl:
+			}
+			atomic.AddInt64(wc, -1)
+			// since the conn may be grabbed by others in high concurrency, so avoid retry too quickly,
 			// give the scheduler time to breath; affects latency minimally, but throughput drastically
-			time.Sleep(time.Microsecond * 400)
+			time.Sleep(sleepBetweenRetry)
 			goto CL
 		}
 
@@ -494,6 +524,21 @@ func (nd *Node) getConnectionWithHint(timeout time.Duration, hint byte, isLargeK
 	return conn, nil
 }
 
+func (nd *Node) maybeWakeupWaiting(isLarge bool) {
+	wc := &nd.waitingCnt
+	wl := nd.waitList
+	if isLarge {
+		wc = &nd.waitingCntForLarge
+		wl = nd.waitListForLarge
+	}
+	if atomic.LoadInt64(wc) > 0 {
+		select {
+		case wl <- struct{}{}:
+		default:
+		}
+	}
+}
+
 // PutConnection puts back a connection to the pool.
 // If connection pool is full, the connection will be
 // closed and discarded.
@@ -502,10 +547,14 @@ func (nd *Node) putConnectionWithHint(conn *Connection, hint byte) {
 	if conn.isForLargeKey {
 		if !nd.active.Get() || !nd.largeKeyConnections.Offer(conn, hint) {
 			conn.Close()
+		} else {
+			nd.maybeWakeupWaiting(true)
 		}
 	} else {
 		if !nd.active.Get() || !nd.connections.Offer(conn, hint) {
 			conn.Close()
+		} else {
+			nd.maybeWakeupWaiting(false)
 		}
 	}
 }

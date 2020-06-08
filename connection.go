@@ -247,6 +247,7 @@ func (ctn *Connection) Close() {
 			} else {
 				ctn.node.connectionCount.DecrementAndGet()
 			}
+			ctn.node.maybeWakeupWaiting(ctn.isForLargeKey)
 		}
 
 		if err := ctn.conn.Close(); err != nil {
