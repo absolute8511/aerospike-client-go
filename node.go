@@ -383,8 +383,8 @@ func (nd *Node) getConnectionWithRetry(timeout time.Duration, hint byte, maxRetr
 	}
 	deadline := time.Now().Add(realTo)
 	// avoid retry too much for exception keys
-	if isLargeKey && maxRetries > 3 {
-		maxRetries = 3
+	if isLargeKey && maxRetries > 1 {
+		maxRetries = 1
 	}
 	retry := 0
 	var to *time.Timer
@@ -394,6 +394,15 @@ func (nd *Node) getConnectionWithRetry(timeout time.Duration, hint byte, maxRetr
 			to.Stop()
 		}
 	}()
+	wc := &nd.waitingCnt
+	wl := nd.waitList
+	if isLargeKey {
+		wc = &nd.waitingCntForLarge
+		wl = nd.waitListForLarge
+	}
+	if atomic.LoadInt64(wc) > int64(nd.cluster.clientPolicy.ConnectionQueueSize*2) {
+		return nil, ErrConnectionPoolEmpty
+	}
 CL:
 	// try to acquire a connection; if the connection pool is empty, retry until
 	// timeout occures. If no timeout is set, will retry indefinitely.
@@ -407,18 +416,18 @@ CL:
 			if to == nil {
 				to = time.NewTimer(realTo)
 			}
-			wc := &nd.waitingCnt
-			wl := nd.waitList
-			if isLargeKey {
-				wc = &nd.waitingCntForLarge
-				wl = nd.waitListForLarge
-			}
+
+			timeoutDone := false
 			atomic.AddInt64(wc, 1)
 			select {
 			case <-to.C:
+				timeoutDone = true
 			case <-wl:
 			}
 			atomic.AddInt64(wc, -1)
+			if timeoutDone {
+				return nil, err
+			}
 			// since the conn may be grabbed by others in high concurrency, so avoid retry too quickly,
 			// give the scheduler time to breath; affects latency minimally, but throughput drastically
 			time.Sleep(sleepBetweenRetry)

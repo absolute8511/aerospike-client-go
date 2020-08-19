@@ -101,6 +101,10 @@ func newConnectionQueue(size int) *connectionQueue {
 	if queueCount <= 0 {
 		queueCount = 1
 	}
+	// avoid too much count which may cause high cpu while full
+	if queueCount > 4 {
+		queueCount = 4
+	}
 	// will be >= 1
 	perQueueSize := size / queueCount
 
