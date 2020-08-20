@@ -30,7 +30,7 @@ const (
 	_PARTITIONS            = 4096
 	largeKeySize           = 1024 * 256
 	largeKeyPoolSize       = 4
-	largeKeyGetConnTimeout = time.Millisecond * 60
+	largeKeyGetConnTimeout = time.Millisecond * 30
 	sleepBetweenRetry      = time.Microsecond * 200
 )
 
