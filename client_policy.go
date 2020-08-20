@@ -20,6 +20,7 @@ import (
 )
 
 const defaultIdleTimeout = 14 * time.Second
+const defaultConnQueueMaxWait = time.Millisecond * 20
 
 // ClientPolicy encapsulates parameters for client policy command.
 type ClientPolicy struct {
@@ -54,6 +55,8 @@ type ClientPolicy struct {
 	// to the node if there are already `ConnectionQueueSize` active connections.
 	LimitConnectionsToQueueSize bool //= true
 
+	// the max wait time if the pool is full
+	ConnQueueMaxWait time.Duration // = 20ms
 	// Throw exception if host connection fails during addHost().
 	FailIfNotConnected bool //= true
 
@@ -101,6 +104,7 @@ func NewClientPolicy() *ClientPolicy {
 		IdleTimeout:                 defaultIdleTimeout,
 		ConnectionQueueSize:         256,
 		LargeConnectionQueueSize:    4,
+		ConnQueueMaxWait:            defaultConnQueueMaxWait,
 		FailIfNotConnected:          true,
 		TendInterval:                time.Second,
 		LimitConnectionsToQueueSize: true,
