@@ -504,6 +504,7 @@ func (nd *Node) getConnectionWithHint(timeout time.Duration, hint byte, isLargeK
 		if conn, err = NewSecureConnection(&nd.cluster.clientPolicy, nd.host); err != nil {
 			counter.DecrementAndGet()
 			atomic.AddInt64(&nd.stats.ConnectionsFailed, 1)
+			nd.maybeWakeupWaiting(isLargeKey)
 			return nil, err
 		}
 		conn.node = nd
