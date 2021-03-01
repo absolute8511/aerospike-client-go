@@ -31,7 +31,7 @@ const (
 	largeKeySize           = 1024 * 256
 	largeKeyPoolSize       = 4
 	largeKeyGetConnTimeout = time.Millisecond * 20
-	sleepBetweenRetry      = time.Microsecond * 200
+	sleepBetweenRetry      = time.Microsecond * 20
 )
 
 // Node represents an Aerospike Database Server Node
