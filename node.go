@@ -34,6 +34,74 @@ const (
 	sleepBetweenRetry      = time.Microsecond * 20
 )
 
+type waitQueueItem struct {
+	done chan struct{}
+}
+
+type waitQueue struct {
+	waitCnt  int32
+	initSize int
+	tokenCh  chan struct{}
+}
+
+func newWaitQueue(init int) *waitQueue {
+	wq := &waitQueue{
+		tokenCh:  make(chan struct{}, init),
+		initSize: init,
+	}
+	for i := 0; i < init; i++ {
+		wq.tokenCh <- struct{}{}
+	}
+	return wq
+}
+
+func (wq *waitQueue) TryToken() bool {
+	select {
+	case <-wq.tokenCh:
+		return true
+	default:
+		return false
+	}
+}
+
+func (wq *waitQueue) WaitToken(wc <-chan time.Time) bool {
+	ncnt := atomic.AddInt32(&wq.waitCnt, 1)
+	defer atomic.AddInt32(&wq.waitCnt, -1)
+	if int(ncnt) > wq.initSize*2 {
+		return false
+	}
+	select {
+	case <-wc:
+		return false
+	case <-wq.tokenCh:
+		return true
+	}
+}
+
+// refill period to avoid bug caused the token leak
+func (wq *waitQueue) refill() {
+	if len(wq.tokenCh) < 1 {
+		for {
+			select {
+			case wq.tokenCh <- struct{}{}:
+			default:
+				return
+			}
+		}
+	}
+}
+
+func (wq *waitQueue) ReturnToken() {
+	select {
+	case wq.tokenCh <- struct{}{}:
+	default:
+	}
+}
+
+func (wq *waitQueue) WaitCnt() int {
+	return int(atomic.LoadInt32(&wq.waitCnt))
+}
+
 // Node represents an Aerospike Database Server Node
 type Node struct {
 	cluster *Cluster
@@ -63,11 +131,9 @@ type Node struct {
 	failures            AtomicInt
 	partitionChanged    AtomicBool
 
-	active             AtomicBool
-	waitListForLarge   chan struct{}
-	waitingCntForLarge int64
-	waitList           chan struct{}
-	waitingCnt         int64
+	active     AtomicBool
+	wq         *waitQueue
+	wqForLarge *waitQueue
 
 	supportsFloat, supportsBatchIndex, supportsReplicasAll, supportsGeo, supportsPeers AtomicBool
 }
@@ -102,8 +168,8 @@ func newNode(cluster *Cluster, nv *nodeValidator) *Node {
 		supportsReplicasAll: *NewAtomicBool(nv.supportsReplicasAll),
 		supportsGeo:         *NewAtomicBool(nv.supportsGeo),
 		supportsPeers:       *NewAtomicBool(nv.supportsPeers),
-		waitListForLarge:    make(chan struct{}, lps+1),
-		waitList:            make(chan struct{}, cluster.clientPolicy.ConnectionQueueSize+1),
+		wq:                  newWaitQueue(cluster.clientPolicy.ConnectionQueueSize),
+		wqForLarge:          newWaitQueue(lps),
 	}
 
 	newNode.aliases.Store(nv.aliases)
@@ -177,6 +243,12 @@ func (nd *Node) Refresh(peers *peers) error {
 	peers.refreshCount.IncrementAndGet()
 	nd.referenceCount.IncrementAndGet()
 	atomic.AddInt64(&nd.stats.TendsSuccessful, 1)
+	if nd.getCurrentCounter(false) <= 0 {
+		nd.wq.refill()
+	}
+	if nd.getCurrentCounter(true) <= 0 {
+		nd.wqForLarge.refill()
+	}
 
 	return nil
 }
@@ -384,28 +456,31 @@ func (nd *Node) getConnectionWithRetry(timeout time.Duration, hint byte, maxRetr
 	if realTo > nd.cluster.clientPolicy.ConnQueueMaxWait {
 		realTo = nd.cluster.clientPolicy.ConnQueueMaxWait
 	}
-	deadline := time.Now().Add(realTo)
 	// avoid retry too much for exception keys
 	if isLargeKey && maxRetries > 1 {
 		maxRetries = 1
 	}
 	retry := 0
-	var to *time.Timer
-
+	wq := nd.wq
+	if isLargeKey {
+		wq = nd.wqForLarge
+	}
+	ok := wq.TryToken()
+	if !ok {
+		to := time.NewTimer(realTo)
+		ok = wq.WaitToken(to.C)
+		to.Stop()
+		if !ok {
+			return nil, ErrConnectionPoolEmpty
+		}
+	}
 	defer func() {
-		if to != nil {
-			to.Stop()
+		if err != nil {
+			wq.ReturnToken()
 		}
 	}()
-	wc := &nd.waitingCnt
-	wl := nd.waitList
-	if isLargeKey {
-		wc = &nd.waitingCntForLarge
-		wl = nd.waitListForLarge
-	}
-	if atomic.LoadInt64(wc) > int64(nd.cluster.clientPolicy.ConnectionQueueSize*2) {
-		return nil, ErrConnectionPoolEmpty
-	}
+	deadline := time.Now().Add(realTo)
+
 CL:
 	// try to acquire a connection; if the connection pool is empty, retry until
 	// timeout occures. If no timeout is set, will retry indefinitely.
@@ -416,24 +491,9 @@ CL:
 			if (maxRetries <= 0 && retry > 0) || (maxRetries > 0 && retry >= maxRetries) {
 				return nil, err
 			}
-			if to == nil {
-				to = time.NewTimer(realTo)
-			}
-
-			timeoutDone := false
-			atomic.AddInt64(wc, 1)
 			// since the conn may be grabbed by others in high concurrency, so avoid retry too quickly,
 			// give the scheduler time to breath; affects latency minimally, but throughput drastically
 			time.Sleep(sleepBetweenRetry)
-			select {
-			case <-to.C:
-				timeoutDone = true
-			case <-wl:
-			}
-			atomic.AddInt64(wc, -1)
-			if timeoutDone {
-				return nil, err
-			}
 			goto CL
 		}
 
@@ -458,6 +518,26 @@ func (nd *Node) getConnectionWithHintAndRetry(timeout time.Duration, hint byte, 
 	return nd.getConnectionWithRetry(timeout, hint, maxRetry, isLargeKey)
 }
 
+func (nd *Node) getConnQueueSize(isLargeKey bool) int {
+	queueSize := nd.cluster.clientPolicy.ConnectionQueueSize
+	if isLargeKey {
+		queueSize = nd.cluster.clientPolicy.LargeConnectionQueueSize
+		if queueSize <= 0 {
+			queueSize = largeKeyPoolSize
+		}
+	}
+	return queueSize
+}
+
+func (nd *Node) getCurrentCounter(isLargeKey bool) int {
+	counter := &nd.connectionCount
+	if isLargeKey {
+		counter = &nd.largeKeyConnectionCount
+	}
+	cc := counter.Get()
+	return cc
+}
+
 // getConnectionWithHint gets a connection to the node.
 // If no pooled connection is available, a new connection will be created.
 // This method does not include logic to retry in case the connection pool is empty
@@ -466,15 +546,11 @@ func (nd *Node) getConnectionWithHint(timeout time.Duration, hint byte, isLargeK
 	cpool := &nd.connections
 	counter := &nd.connectionCount
 	limitSize := nd.cluster.clientPolicy.LimitConnectionsToQueueSize
-	queueSize := nd.cluster.clientPolicy.ConnectionQueueSize
+	queueSize := nd.getConnQueueSize(isLargeKey)
 	if isLargeKey {
 		cpool = &nd.largeKeyConnections
 		counter = &nd.largeKeyConnectionCount
 		limitSize = true
-		queueSize = nd.cluster.clientPolicy.LargeConnectionQueueSize
-		if queueSize <= 0 {
-			queueSize = largeKeyPoolSize
-		}
 	}
 	for t := cpool.Poll(hint); t != nil; t = cpool.Poll(hint) {
 		conn = t //.(*Connection)
@@ -504,7 +580,6 @@ func (nd *Node) getConnectionWithHint(timeout time.Duration, hint byte, isLargeK
 		if conn, err = NewSecureConnection(&nd.cluster.clientPolicy, nd.host); err != nil {
 			counter.DecrementAndGet()
 			atomic.AddInt64(&nd.stats.ConnectionsFailed, 1)
-			nd.maybeWakeupWaiting(isLargeKey)
 			return nil, err
 		}
 		conn.node = nd
@@ -537,18 +612,11 @@ func (nd *Node) getConnectionWithHint(timeout time.Duration, hint byte, isLargeK
 }
 
 func (nd *Node) maybeWakeupWaiting(isLarge bool) {
-	wc := &nd.waitingCnt
-	wl := nd.waitList
+	wq := nd.wq
 	if isLarge {
-		wc = &nd.waitingCntForLarge
-		wl = nd.waitListForLarge
+		wq = nd.wqForLarge
 	}
-	if atomic.LoadInt64(wc) > 0 {
-		select {
-		case wl <- struct{}{}:
-		default:
-		}
-	}
+	wq.ReturnToken()
 }
 
 // PutConnection puts back a connection to the pool.
